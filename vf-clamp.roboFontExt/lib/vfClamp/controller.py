@@ -347,7 +347,7 @@ def compact_name(first, last):
 	# Cross-plugin canonical source-of-truth (resolves #64):
 	#
 	# The TypeScript implementation in
-	#   @liiift-studio/vf-clamp  src/core/utils.ts  compactName()
+	#   @overpunch/vf-clamp  src/core/utils.ts  compactName()
 	# is the authoritative reference. Any behavioural change MUST land there
 	# first, then be ported here and to the other in-app plugin copies:
 	#   - plugins/glyphs/vf-clamp.glyphsPlugin/plugin.py        (compact_name)
@@ -582,7 +582,7 @@ def _recompute_os2_and_macstyle(font):
 	"""Update OS/2.usWeightClass, OS/2.fsSelection, head.macStyle to match new wght default.
 
 	Ports the canonical TypeScript implementation in
-	@liiift-studio/vf-clamp src/core/clamp.ts:285-338 (getOs2Updater). Without
+	@overpunch/vf-clamp src/core/clamp.ts:285-338 (getOs2Updater). Without
 	this, OS-level font matching still reports the source font's original
 	weight metadata even after the design space has been restricted (resolves
 	#52). No-op when there is no fvar or no wght axis.

@@ -1,7 +1,7 @@
 # vf-clamp-robofont — Claude Code Configuration
 
 ## Inherited Context
-This is a plugin submodule of `@liiift-studio/vf-clamp`. When working inside the
+This is a plugin submodule of `@overpunch/vf-clamp`. When working inside the
 vf-clamp parent repo checkout, Claude Code will also load `vf-clamp/CLAUDE.md` which
 defines the core purpose, API, name table patching approach, and shared conventions.
 

@@ -161,7 +161,7 @@ Major correctness and UX pass following the consolidated panel review.
 - `info.plist` declares `requiresVersionMajor=4` so RoboFont 3 cannot install the extension.
 - `info.plist` declares `html`, `license` keys; removes vestigial `mainScript`.
 - `info.plist` `developerURL` now points at the studio homepage; `documentationURL` at the repo.
-- Plugin version bumped from `0.1.0` to `2.1.0` to match upstream `@liiift-studio/vf-clamp`.
+- Plugin version bumped from `0.1.0` to `2.1.0` to match upstream `@overpunch/vf-clamp`.
 - `__init__.py` no longer instantiates the controller at import time — opens window only when executed as a menu script.
 - Singleton pattern: second menu invocation focuses the existing window instead of opening a duplicate.
 - `FloatingWindow` gets an `autosaveName` so position/size persist across launches.

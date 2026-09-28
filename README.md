@@ -14,7 +14,7 @@ Select a variable font file, pick one or more named instances, and the extension
 
 **Example:** a customer who buys "Light" and "Bold" receives a VF spanning `wght 300–700`, named *Typeface Light-Bold*, not the full family.
 
-This is the native RoboFont version of the [`@liiift-studio/vf-clamp`](https://github.com/over-punch/vf-clamp) npm package. It calls `fontTools.varLib.instancer` directly — no Node.js or npm required.
+This is the native RoboFont version of the [`@overpunch/vf-clamp`](https://github.com/over-punch/vf-clamp) npm package. It calls `fontTools.varLib.instancer` directly — no Node.js or npm required.
 
 ## Try It Live
 
