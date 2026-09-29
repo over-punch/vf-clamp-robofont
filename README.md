@@ -99,7 +99,7 @@ Proprietary — Liiift Studio. All rights reserved. See `LICENSE` in the repo ro
 - [vfclamp.com](https://vfclamp.com)
 - [vf-clamp-robofont (this repo)](https://github.com/over-punch/vf-clamp-robofont)
 - [vf-clamp npm package](https://github.com/over-punch/vf-clamp)
-- [Liiift Studio](https://liiift.studio)
+- [Liiift Studio](https://overpunch.ca)
 
 ## Changelog
 
