@@ -8,6 +8,9 @@ Generate restricted variable fonts from named instance ranges. Per-purchase micr
 
 > The screenshot above is taken inside Glyphs.app — RoboFont renders the same chart and animated specimen because the two custom `NSView` modules ([`hull_plot.py`](vf-clamp.roboFontExt/lib/vfClamp/hull_plot.py) and [`preview_view.py`](vf-clamp.roboFontExt/lib/vfClamp/preview_view.py)) are byte-identical between the two plugins. The surrounding chrome (source picker, instance list, output zone, log pane, action bar) is functionally equivalent in RoboFont, drawn with `vanilla.FloatingWindow` instead of `vanilla.Window`.
 
+
+> **A range includes the styles between.** Selecting Light and Bold also delivers Regular, Medium and SemiBold, because a variable range is continuous. To hand over only what was bought, select an adjacent run (Light, Regular, Medium, SemiBold, Bold) or export non-adjacent styles separately. The npm package's [`planOutputs()`](https://github.com/over-punch/vf-clamp#selling-named-styles-safely) does this grouping automatically.
+
 ## What It Does
 
 Select a variable font file, pick one or more named instances, and the extension produces a restricted VF that spans exactly that axis range — with the name table, STAT table, and fvar instances updated to reflect the purchased range.
@@ -89,6 +92,13 @@ The restricted VF is written to the output folder immediately.
 - **Gatekeeper blocks the bundle on install** — right-click the `.roboFontExt`, choose **Open**, confirm.
 - **fontTools version mismatch** — the controller warns at import time if fontTools is older than 4.13.0. Check RoboFont's Python console.
 - **PostScript name issues** — nameID 6 is restricted to ASCII; the extension strips non-ASCII characters and enforces the 63-char limit. nameID 25 (Variations PS Name Prefix) is further restricted to `[A-Za-z0-9]` and ≤27 characters per the OpenType spec.
+
+## The vf-clamp family
+
+- [`@overpunch/vf-clamp`](https://github.com/over-punch/vf-clamp): the core npm package and hosted REST API
+- [CLI](https://github.com/over-punch/vf-clamp-cli) · [Glyphs plugin](https://github.com/over-punch/vf-clamp-glyphs) · [RoboFont extension](https://github.com/over-punch/vf-clamp-robofont) (this repo) · [VS Code extension](https://github.com/over-punch/vf-clamp-vscode)
+- [vfclamp.com](https://vfclamp.com): the interactive demo
+- Why it matters: [*Sell the Styles, Ship the Space*](https://vfclamp.com/talk/paper), a survey of 394 foundries with file-size benchmarks and model licence language
 
 ## License
 
