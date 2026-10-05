@@ -98,7 +98,7 @@ The restricted VF is written to the output folder immediately.
 - [`@overpunch/vf-clamp`](https://github.com/over-punch/vf-clamp): the core npm package and hosted REST API
 - [CLI](https://github.com/over-punch/vf-clamp-cli) · [Glyphs plugin](https://github.com/over-punch/vf-clamp-glyphs) · [RoboFont extension](https://github.com/over-punch/vf-clamp-robofont) (this repo) · [VS Code extension](https://github.com/over-punch/vf-clamp-vscode)
 - [vfclamp.com](https://vfclamp.com): the interactive demo
-- Why it matters: [*Sell the Styles, Ship the Space*](https://vfclamp.com/talk/paper), a survey of 394 foundries with file-size benchmarks and model licence language
+- Why it matters: [*Sell the Styles, Ship the Space*](https://vfclamp.com/paper), a survey of 394 foundries with file-size benchmarks and model licence language
 
 ## License
 
