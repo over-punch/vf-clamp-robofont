@@ -5,6 +5,7 @@
 import logging
 import os
 import re
+import unicodedata
 import traceback
 import warnings
 
@@ -255,13 +256,30 @@ def compute_hull(font, selected_keys):
 	return result
 
 
+def _short_hash(text):
+	"""Six-character FNV-1a hash of a string (base 36), matching shortHash() in @overpunch/vf-clamp."""
+	h = 0x811c9dc5
+	for ch in text:
+		h ^= ord(ch)
+		h = (h * 0x01000193) & 0xFFFFFFFF
+	digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+	out = ''
+	while h:
+		h, rem = divmod(h, 36)
+		out = digits[rem] + out
+	return (out or '0').rjust(6, '0')[-6:]
+
+
 def _sanitize_ps_name(name, max_len=63):
 	"""Produce a spec-compliant PostScript name (nameID 6).
 
-	Rules: only [A-Za-z0-9-], no leading hyphen/digit, no consecutive hyphens,
-	max 63 chars, never empty. Falls back to 'Untitled' on degenerate input.
+	Rules: accents transliterated (Été -> Ete), only [A-Za-z0-9-], no leading
+	hyphen/digit, no consecutive hyphens, max 63 chars (long names end in a hash
+	of the full name so they stay unique), never empty. Names in other scripts
+	become 'Untitled-<hash>'; degenerate input becomes 'Untitled'.
 	"""
-	safe = re.sub(r'[^A-Za-z0-9-]', '', name.replace(' ', '-'))
+	ascii_name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
+	safe = re.sub(r'[^A-Za-z0-9-]', '', ascii_name.replace(' ', '-'))
 	# Collapse runs of hyphens.
 	safe = re.sub(r'-{2,}', '-', safe)
 	# Strip leading non-letter characters (digits, hyphens).
@@ -269,8 +287,10 @@ def _sanitize_ps_name(name, max_len=63):
 	# Strip trailing hyphens.
 	safe = safe.rstrip('-')
 	if not safe:
-		safe = 'Untitled'
-	return safe[:max_len]
+		return f'Untitled-{_short_hash(name)}' if any(c.isalpha() for c in name) else 'Untitled'
+	if len(safe) > max_len:
+		safe = f'{safe[:max_len - 7].rstrip("-")}-{_short_hash(name)}'
+	return safe
 
 
 def _sanitize_vf_prefix(name, max_len=27):
@@ -286,7 +306,18 @@ def _sanitize_vf_prefix(name, max_len=27):
 	return safe[:max_len]
 
 
-def patch_name_table(font, family_name):
+def _default_instance_style(font):
+	"""Return the subfamily name of the named instance at the font's default location, or None."""
+	if 'fvar' not in font:
+		return None
+	defaults = {ax.axisTag: ax.defaultValue for ax in font['fvar'].axes}
+	for inst in font['fvar'].instances:
+		if all(abs(inst.coordinates.get(t, v) - v) < 0.01 for t, v in defaults.items()):
+			return font['name'].getDebugName(inst.subfamilyNameID)
+	return None
+
+
+def patch_name_table(font, family_name, style=None):
 	"""Update name table so restricted VF reflects its instance range.
 
 	Updates nameID 1 (Family), 2 (Subfamily), 4 (Full Name), 6 (PostScript Name),
@@ -298,10 +329,16 @@ def patch_name_table(font, family_name):
 	ps_name = _sanitize_ps_name(family_name)
 	vf_prefix = _sanitize_vf_prefix(family_name)
 
-	# Subfamily default after clamping to a range: 'Regular' is the canonical
-	# value for a multi-style VF that is not specifically bold/italic-only.
-	subfamily = 'Regular'
-	full_name = f'{family_name} {subfamily}' if subfamily and subfamily != 'Regular' else family_name
+	# nameID 2 is the RIBBI style that agrees with OS/2 (recomputed before this runs);
+	# nameID 17 and the full name carry the real style: the picked instance for a pin,
+	# else the instance at the new default location.
+	fs = font['OS/2'].fsSelection if 'OS/2' in font else 0x40
+	is_bold, is_italic = bool(fs & 0x20), bool(fs & 0x01)
+	subfamily = ('Bold Italic' if is_italic else 'Bold') if is_bold else ('Italic' if is_italic else 'Regular')
+	style = (style or '').strip() or _default_instance_style(font) or subfamily
+	if is_italic and 'Italic' not in style:
+		style = 'Italic' if style == 'Regular' else f'{style} Italic'
+	full_name = f'{family_name} {style}' if style not in ('Regular', '') else family_name
 	# Unique font identifier: 'Author: Family Regular: YYYY' would need date/author;
 	# we use a deterministic but distinctive form so font caches don't collide with
 	# the source font.
@@ -321,9 +358,22 @@ def patch_name_table(font, family_name):
 		updates[16] = family_name
 	# OpenType: when nameID 16 is present, nameID 17 must be present too.
 	if 16 in existing_ids or 17 in existing_ids:
-		updates[17] = subfamily
+		updates[17] = style
+	elif style not in ('Regular', 'Bold', 'Italic', 'Bold Italic'):
+		# No typographic family: nameID 2 carries the style itself (e.g. SemiBold).
+		updates[2] = style
 	if 25 in existing_ids:
 		updates[25] = vf_prefix
+
+	# Named instances' PostScript names follow the new prefix, so they don't keep the retail ones.
+	prefix = updates.get(25, ps_name)
+	if 'fvar' in font:
+		for inst in font['fvar'].instances:
+			pid = getattr(inst, 'postscriptNameID', 0xFFFF)
+			if pid in (None, 0xFFFF) or pid in updates:
+				continue
+			inst_style = re.sub(r'[^A-Za-z0-9-]', '', (name_table.getDebugName(inst.subfamilyNameID) or '').replace(' ', ''))
+			updates[pid] = f'{prefix}-{inst_style}'[:63]
 
 	# Drop ALL existing records (any language, any platform) for the IDs we are
 	# rewriting — prevents stale localized Japanese/German records from leaking
@@ -555,10 +605,11 @@ def _prune_stat_table(font, hull):
 		if linked is None:
 			continue
 		if not (lo <= linked <= hi):
-			# 0 is the spec-prescribed "no link" sentinel. We also flip the
-			# format bit so renderers don't expect a usable link.
-			av.LinkedValue = 0
-			av.Flags = getattr(av, 'Flags', 0) & ~0x0004  # 0x0004 = LinkedValue flag
+			# The link points at a style the file can't reach. STAT has no "no link"
+			# value (0 would be a real link to weight 0), so keep the name and drop
+			# the link by turning the record into Format 1.
+			av.Format = 1
+			del av.LinkedValue
 
 	axis_value_array.AxisValue = kept
 
@@ -585,31 +636,30 @@ def _recompute_os2_and_macstyle(font):
 	@overpunch/vf-clamp src/core/clamp.ts:285-338 (getOs2Updater). Without
 	this, OS-level font matching still reports the source font's original
 	weight metadata even after the design space has been restricted (resolves
-	#52). No-op when there is no fvar or no wght axis.
+	#52). When wght was pinned out of fvar, the pinned usWeightClass is used.
 	"""
-	if 'fvar' not in font:
+	wght_axis = next((ax for ax in font['fvar'].axes if ax.axisTag == 'wght'), None) if 'fvar' in font else None
+	if wght_axis is not None:
+		# OS/2.usWeightClass valid range is 1..1000.
+		weight_class = int(round(max(1, min(1000, wght_axis.defaultValue))))
+	elif 'OS/2' in font:
+		# wght was pinned: fontTools has already set usWeightClass to the pinned weight.
+		weight_class = font['OS/2'].usWeightClass
+	else:
 		return
-	wght_axis = next((ax for ax in font['fvar'].axes if ax.axisTag == 'wght'), None)
-	if wght_axis is None:
-		return
-
-	new_default = wght_axis.defaultValue
-	# OS/2.usWeightClass valid range is 1..1000.
-	weight_class = int(round(max(1, min(1000, new_default))))
 
 	if 'OS/2' in font:
 		os2 = font['OS/2']
 		os2.usWeightClass = weight_class
 		# fsSelection bits: 0x20 = BOLD, 0x40 = REGULAR.
-		# Mirror the canonical convention: REGULAR when usWeightClass < 600,
-		# BOLD when >= 700; neither bit set in the 600-699 mid-weight band so
-		# semibold-only ranges don't lie about being either flavour.
+		# Mirror the canonical convention (vf-clamp 2.3.0): BOLD at 700 and up;
+		# REGULAR only when the file is neither bold nor italic. The italic bit is kept.
 		fs = os2.fsSelection
 		fs &= ~(0x20 | 0x40)
 		if weight_class >= 700:
 			fs |= 0x20  # BOLD
-		elif weight_class < 600:
-			fs |= 0x40  # REGULAR
+		elif not fs & 0x01:
+			fs |= 0x40  # REGULAR only when neither BOLD nor ITALIC
 		os2.fsSelection = fs
 
 	if 'head' in font:
@@ -684,6 +734,12 @@ def _resolve_output_extension(ext_override, source_path):
 	return '.ttf'
 
 
+def _fonttools_version():
+	"""Return the running fontTools version as a (major, minor, patch) tuple, (0, 0, 0) if unknown."""
+	import fontTools
+	return _parse_semver(getattr(fontTools, 'version', None)) or (0, 0, 0)
+
+
 def produce_restricted_vf(font, selected_keys, family_name, output_path, flavor=None, overwrite=False, revision_baseline=None):
 	"""Produce one restricted VF file from an already-loaded TTFont.
 
@@ -703,6 +759,11 @@ def produce_restricted_vf(font, selected_keys, family_name, output_path, flavor=
 	hull = compute_hull(font, selected_keys)
 	if not hull:
 		raise ValueError('No valid instances selected')
+	# avar version 2 needs fontTools 4.64+ to restrict; VARC components can't be restricted at all yet.
+	if 'avar' in font and getattr(font['avar'], 'majorVersion', 1) >= 2 and _fonttools_version() < (4, 64, 0):
+		raise ValueError('This font uses avar version 2, which needs fontTools 4.64 or newer to clamp safely.')
+	if 'VARC' in font:
+		raise ValueError('This font uses variable components (VARC), which fontTools cannot restrict yet.')
 
 	# Pre-emptive overwrite check.
 	if os.path.exists(output_path) and not overwrite:
@@ -727,7 +788,11 @@ def produce_restricted_vf(font, selected_keys, family_name, output_path, flavor=
 	# TTFont still produce monotonically-increasing head.fontRevision values.
 	_bump_font_revision(partial, baseline=revision_baseline)
 	_recompute_os2_and_macstyle(partial)
-	patch_name_table(partial, family_name)
+	# A single picked instance names the file's style (e.g. Bold); a range uses its default instance.
+	style = None
+	if len(selected_keys) == 1 and 'fvar' in font and 0 <= selected_keys[0] < len(font['fvar'].instances):
+		style = _get_instance_label(font['name'], font['fvar'].instances[selected_keys[0]], selected_keys[0])
+	patch_name_table(partial, family_name, style=style)
 
 	# Apply web-font compression *after* all table modifications so the WOFF
 	# header reflects the final byte stream.
