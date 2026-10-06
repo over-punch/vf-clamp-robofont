@@ -94,7 +94,7 @@ class ReviewFixes(unittest.TestCase):
 
 	def test_postscript_names(self):
 		self.assertEqual(controller._sanitize_ps_name('Été Grotesk'), 'Ete-Grotesk')
-		self.assertTrue(controller._sanitize_ps_name('源ノ角ゴシック').startswith('Untitled-'))
+		self.assertTrue(controller._sanitize_ps_name('源ノ角ゴシック').startswith('Font-'))
 		a = controller._sanitize_ps_name('Very Long Family Name Extended Condensed Display Text Regular-Bold A')
 		b = controller._sanitize_ps_name('Very Long Family Name Extended Condensed Display Text Regular-Bold B')
 		self.assertLessEqual(len(a), 63)

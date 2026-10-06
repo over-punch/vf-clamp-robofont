@@ -55,6 +55,7 @@ from fontTools.varLib import instancer
 
 from . import formats
 from . import open_font_core
+from . import vfclamp_naming as _naming  # shared naming rules (synced from vfClamp/shared/plugin-views)
 # v1.0.0: framework-agnostic NSView modules shared with the Glyphs plugin.
 # Both produce raw NSViews mounted via window.contentView().addSubview_;
 # they have no GlyphsApp dependency so they drop straight in here.
@@ -257,138 +258,27 @@ def compute_hull(font, selected_keys):
 
 
 def _short_hash(text):
-	"""Six-character FNV-1a hash of a string (base 36), matching shortHash() in @overpunch/vf-clamp."""
-	h = 0x811c9dc5
-	for ch in text:
-		h ^= ord(ch)
-		h = (h * 0x01000193) & 0xFFFFFFFF
-	digits = '0123456789abcdefghijklmnopqrstuvwxyz'
-	out = ''
-	while h:
-		h, rem = divmod(h, 36)
-		out = digits[rem] + out
-	return (out or '0').rjust(6, '0')[-6:]
+	"""Six-character hash of a string; see vfclamp_naming.short_hash (shared with npm and Glyphs)."""
+	return _naming.short_hash(text)
 
 
 def _sanitize_ps_name(name, max_len=63):
-	"""Produce a spec-compliant PostScript name (nameID 6).
-
-	Rules: accents transliterated (Été -> Ete), only [A-Za-z0-9-], no leading
-	hyphen/digit, no consecutive hyphens, max 63 chars (long names end in a hash
-	of the full name so they stay unique), never empty. Names in other scripts
-	become 'Untitled-<hash>'; degenerate input becomes 'Untitled'.
-	"""
-	ascii_name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
-	safe = re.sub(r'[^A-Za-z0-9-]', '', ascii_name.replace(' ', '-'))
-	# Collapse runs of hyphens.
-	safe = re.sub(r'-{2,}', '-', safe)
-	# Strip leading non-letter characters (digits, hyphens).
-	safe = re.sub(r'^[^A-Za-z]+', '', safe)
-	# Strip trailing hyphens.
-	safe = safe.rstrip('-')
-	if not safe:
-		return f'Untitled-{_short_hash(name)}' if any(c.isalpha() for c in name) else 'Untitled'
-	if len(safe) > max_len:
-		safe = f'{safe[:max_len - 7].rstrip("-")}-{_short_hash(name)}'
-	return safe
+	"""PostScript name (nameID 6); see vfclamp_naming.ps_name, the one implementation shared with npm and Glyphs."""
+	return _naming.ps_name(name, max_len)
 
 
 def _sanitize_vf_prefix(name, max_len=27):
-	"""Produce a spec-compliant Variations PS Name Prefix (nameID 25).
-
-	Rules per OT spec: only [A-Za-z0-9] (NO hyphens), ≤27 characters,
-	must start with a letter. Falls back to 'Untitled' on degenerate input.
-	"""
-	safe = re.sub(r'[^A-Za-z0-9]', '', name)
-	safe = re.sub(r'^[^A-Za-z]+', '', safe)
-	if not safe:
-		safe = 'Untitled'
-	return safe[:max_len]
-
-
-def _default_instance_style(font):
-	"""Return the subfamily name of the named instance at the font's default location, or None."""
-	if 'fvar' not in font:
-		return None
-	defaults = {ax.axisTag: ax.defaultValue for ax in font['fvar'].axes}
-	for inst in font['fvar'].instances:
-		if all(abs(inst.coordinates.get(t, v) - v) < 0.01 for t, v in defaults.items()):
-			return font['name'].getDebugName(inst.subfamilyNameID)
-	return None
+	"""Variations PostScript Name Prefix (nameID 25); see vfclamp_naming.vf_prefix."""
+	return _naming.vf_prefix(_naming.ps_name(name), name)
 
 
 def patch_name_table(font, family_name, style=None):
-	"""Update name table so restricted VF reflects its instance range.
+	"""Write the clamped font's names; see vfclamp_naming.apply_names (shared with npm and Glyphs).
 
-	Updates nameID 1 (Family), 2 (Subfamily), 4 (Full Name), 6 (PostScript Name),
-	16/17 (Typographic Family/Subfamily) and 25 (Variations PS Name Prefix when present).
-	Also regenerates nameID 3 (Unique Font Identifier) and nameID 5 (Version) is left
-	alone; head.fontRevision is bumped separately. Drops non-English localized records
-	for these IDs so locale-aware renderers don't surface stale family names.
+	Run after the style bits are set. RoboFont writes Windows (and Unicode) records only, so Mac
+	records for the rewritten IDs are dropped (``keep_mac=False``).
 	"""
-	ps_name = _sanitize_ps_name(family_name)
-	vf_prefix = _sanitize_vf_prefix(family_name)
-
-	# nameID 2 is the RIBBI style that agrees with OS/2 (recomputed before this runs);
-	# nameID 17 and the full name carry the real style: the picked instance for a pin,
-	# else the instance at the new default location.
-	fs = font['OS/2'].fsSelection if 'OS/2' in font else 0x40
-	is_bold, is_italic = bool(fs & 0x20), bool(fs & 0x01)
-	subfamily = ('Bold Italic' if is_italic else 'Bold') if is_bold else ('Italic' if is_italic else 'Regular')
-	style = (style or '').strip() or _default_instance_style(font) or subfamily
-	if is_italic and 'Italic' not in style:
-		style = 'Italic' if style == 'Regular' else f'{style} Italic'
-	# Full name: leave out 'Regular' (as the OpenType spec advises) and a style the family name already ends with.
-	full_name = family_name if style in ('Regular', '') or family_name.lower().endswith(style.lower()) else f'{family_name} {style}'
-	# Unique font identifier: 'Author: Family Regular: YYYY' would need date/author;
-	# we use a deterministic but distinctive form so font caches don't collide with
-	# the source font.
-	unique_id = f'{ps_name};vf-clamp'
-
-	name_table = font['name']
-	existing_ids = {r.nameID for r in name_table.names}
-
-	updates = {
-		1: family_name,
-		2: subfamily,
-		3: unique_id,
-		4: full_name,
-		6: ps_name,
-	}
-	if 16 in existing_ids:
-		updates[16] = family_name
-	# OpenType: when nameID 16 is present, nameID 17 must be present too.
-	if 16 in existing_ids or 17 in existing_ids:
-		updates[17] = style
-	# Without a typographic family, nameID 2 stays RIBBI (OpenType spec): a non-RIBBI style such as
-	# SemiBold lives in the family name, like "Arial Black" + "Regular".
-	if 25 in existing_ids:
-		updates[25] = vf_prefix
-
-	# Named instances' PostScript names follow the new prefix, so they don't keep the retail ones.
-	prefix = updates.get(25, ps_name)
-	if 'fvar' in font:
-		for inst in font['fvar'].instances:
-			pid = getattr(inst, 'postscriptNameID', 0xFFFF)
-			if pid in (None, 0xFFFF) or pid in updates:
-				continue
-			inst_style = re.sub(r'[^A-Za-z0-9-]', '', (name_table.getDebugName(inst.subfamilyNameID) or '').replace(' ', ''))
-			updates[pid] = f'{prefix}-{inst_style}'[:63]
-
-	# Drop ALL existing records (any language, any platform) for the IDs we are
-	# rewriting — prevents stale localized Japanese/German records from leaking
-	# the original family name through CSS / OS font matching.
-	name_table.names = [
-		r for r in name_table.names
-		if r.nameID not in updates
-	]
-
-	# Re-add canonical English Windows (platformID 3, encodingID 1, langID 0x0409)
-	# records. Mac platform records are intentionally omitted: modern OS font
-	# matching uses platformID 3 exclusively, and mac_roman cannot encode
-	# non-ASCII text without lossy substitution.
-	for name_id, value in updates.items():
-		name_table.setName(value, name_id, _PLATFORM_WIN, 1, _LANG_EN_US)
+	return _naming.apply_names(font, family_name, style, keep_mac=False)
 
 
 def compact_name(first, last):
@@ -629,48 +519,9 @@ def _prune_stat_table(font, hull):
 	return removed
 
 
-def _recompute_os2_and_macstyle(font):
-	"""Update OS/2.usWeightClass, OS/2.fsSelection, head.macStyle to match new wght default.
-
-	Ports the canonical TypeScript implementation in
-	@overpunch/vf-clamp src/core/clamp.ts:285-338 (getOs2Updater). Without
-	this, OS-level font matching still reports the source font's original
-	weight metadata even after the design space has been restricted (resolves
-	#52). When wght was pinned out of fvar, the pinned usWeightClass is used.
-	"""
-	wght_axis = next((ax for ax in font['fvar'].axes if ax.axisTag == 'wght'), None) if 'fvar' in font else None
-	if wght_axis is not None:
-		# OS/2.usWeightClass valid range is 1..1000.
-		weight_class = int(round(max(1, min(1000, wght_axis.defaultValue))))
-	elif 'OS/2' in font:
-		# wght was pinned: fontTools has already set usWeightClass to the pinned weight.
-		weight_class = font['OS/2'].usWeightClass
-	else:
-		return
-
-	if 'OS/2' in font:
-		os2 = font['OS/2']
-		os2.usWeightClass = weight_class
-		# fsSelection bits: 0x20 = BOLD, 0x40 = REGULAR.
-		# Mirror the canonical convention (vf-clamp 2.3.0): BOLD at 700 and up;
-		# REGULAR only when the file is neither bold nor italic. The italic bit is kept.
-		fs = os2.fsSelection
-		fs &= ~(0x20 | 0x40)
-		if weight_class >= 700:
-			fs |= 0x20  # BOLD
-		elif not fs & 0x01:
-			fs |= 0x40  # REGULAR only when neither BOLD nor ITALIC
-		os2.fsSelection = fs
-
-	if 'head' in font:
-		head = font['head']
-		# macStyle bit 0 = bold.
-		ms = head.macStyle
-		if weight_class >= 700:
-			ms |= 0x01
-		else:
-			ms &= ~0x01
-		head.macStyle = ms
+def _recompute_os2_and_macstyle(font, pinned=None, source=None):
+	"""Set OS/2 weight/width classes, fsSelection and head.macStyle; see vfclamp_naming.apply_style_bits."""
+	return _naming.apply_style_bits(font, _naming.location_after(font, pinned or {}), source or _naming.source_style_info(font))
 
 
 def _strip_dsig(font):
@@ -774,6 +625,10 @@ def produce_restricted_vf(font, selected_keys, family_name, output_path, flavor=
 	if output_dir:
 		os.makedirs(output_dir, exist_ok=True)
 
+	# The style rules need the source's italic bits and which axes get pinned (they leave fvar).
+	source_info = _naming.source_style_info(font)
+	pinned = {tag: float(v) for tag, v in hull.items() if not isinstance(v, tuple)}
+
 	# Run the instancer, then post-process the resulting font to fix things
 	# fontTools doesn't touch: stale fvar instances, out-of-range axis defaults,
 	# STAT AxisValues, DSIG, and font revision.
@@ -787,12 +642,13 @@ def produce_restricted_vf(font, selected_keys, family_name, output_path, flavor=
 	# Pass revision_baseline so repeated generations from the same in-memory
 	# TTFont still produce monotonically-increasing head.fontRevision values.
 	_bump_font_revision(partial, baseline=revision_baseline)
-	_recompute_os2_and_macstyle(partial)
 	# A single picked instance names the file's style (e.g. Bold); a range uses its default instance.
 	style = None
 	if len(selected_keys) == 1 and 'fvar' in font and 0 <= selected_keys[0] < len(font['fvar'].instances):
 		style = _get_instance_label(font['name'], font['fvar'].instances[selected_keys[0]], selected_keys[0])
-	patch_name_table(partial, family_name, style=style)
+	# STAT links, OS/2 style bits and names: the shared rules (vfclamp_naming.finish, also used by the
+	# npm package and Glyphs), so all three write identical tables. RoboFont omits Mac name records.
+	_naming.finish(partial, family_name, style, pinned, source_info, keep_mac=False)
 
 	# Apply web-font compression *after* all table modifications so the WOFF
 	# header reflects the final byte stream.
@@ -2573,8 +2429,18 @@ class VFClampController:
 
 		selected = [self._instance_names[i] for i in filtered_valid]
 		if selected and not self._name_dirty:
-			name = compact_name(selected[0], selected[-1])
-			self.w.outputNameField.set(name)
+			# One range per axis in the font's own style words ("Encode Sans SemiCondensed-Normal Thin-Light"),
+			# the same rule as npm, the web demo and Glyphs; first/last names when no font file is loaded.
+			name = None
+			if self._font is not None and 'fvar' in self._font and len(full_indices) == len(selected):
+				try:
+					inputs = _naming.naming_inputs(self._font)
+					picked = [inputs['instances'][i] for i in full_indices if 0 <= i < len(inputs['instances'])]
+					family = self._font['name'].getDebugName(16) or self._font['name'].getDebugName(1) or ''
+					name = f"{family} {_naming.range_name(picked, inputs['instances'], inputs['axes'], inputs['labels'])}".strip()
+				except Exception:
+					name = None
+			self.w.outputNameField.set(name or compact_name(selected[0], selected[-1]))
 
 		# Render the design-space preview (colored axis chips / chart) using
 		# *full* indices so compute_hull(font, …) hits the right instances.
