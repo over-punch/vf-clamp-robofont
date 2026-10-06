@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.5 — 2026-10-06
+
+### Changed
+Naming now comes from one shared module, `vfclamp_naming.py`, synced from vf-clamp. The same file runs inside the npm package, so the Glyphs, RoboFont and npm outputs are identical (checked field by field with a parity harness). Changes:
+
+- **Default output names give one range per axis**, in the font's own style words: selecting SemiCondensed and normal-width Thin–Light suggests "Encode Sans SemiCondensed-Normal Thin-Light" rather than "SemiCondensed Thin-Light".
+- **A single-style pin** carries its style in the PostScript name (two pins of the same family no longer collide) and in nameID 17. A non-RIBBI pin (SemiBold) follows the OpenType "Arial Black" pattern: nameID 1 "Family SemiBold", nameID 2 "Regular", 16/17 written.
+- **Slant-based italics** (`slnt` < 0) set ITALIC and OBLIQUE.
+- **nameID 25** holds ASCII letters and digits only (OpenType spec), at most 27 characters; named-instance PostScript names use it, so long family names stay unique.
+- **Family names in another script** give `Font-<hash>` (was `Untitled`) PostScript names.
+- **A blank output name is refused.**
+
 ## 1.2.4 — 2026-10-05
 
 ### Fixed
