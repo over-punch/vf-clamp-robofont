@@ -338,7 +338,8 @@ def patch_name_table(font, family_name, style=None):
 	style = (style or '').strip() or _default_instance_style(font) or subfamily
 	if is_italic and 'Italic' not in style:
 		style = 'Italic' if style == 'Regular' else f'{style} Italic'
-	full_name = f'{family_name} {style}' if style not in ('Regular', '') else family_name
+	# Full name: leave out 'Regular' (as the OpenType spec advises) and a style the family name already ends with.
+	full_name = family_name if style in ('Regular', '') or family_name.lower().endswith(style.lower()) else f'{family_name} {style}'
 	# Unique font identifier: 'Author: Family Regular: YYYY' would need date/author;
 	# we use a deterministic but distinctive form so font caches don't collide with
 	# the source font.
@@ -359,9 +360,8 @@ def patch_name_table(font, family_name, style=None):
 	# OpenType: when nameID 16 is present, nameID 17 must be present too.
 	if 16 in existing_ids or 17 in existing_ids:
 		updates[17] = style
-	elif style not in ('Regular', 'Bold', 'Italic', 'Bold Italic'):
-		# No typographic family: nameID 2 carries the style itself (e.g. SemiBold).
-		updates[2] = style
+	# Without a typographic family, nameID 2 stays RIBBI (OpenType spec): a non-RIBBI style such as
+	# SemiBold lives in the family name, like "Arial Black" + "Regular".
 	if 25 in existing_ids:
 		updates[25] = vf_prefix
 
