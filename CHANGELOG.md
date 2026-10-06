@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.4 — 2026-10-05
+
+### Fixed
+Fixes from a font-engineering review of vf-clamp (the same issues were fixed in `@overpunch/vf-clamp` 2.3.0):
+- **No more bogus STAT links.** An out-of-range Format 3 link was "cleared" by setting LinkedValue to 0 and an unrelated flag bit, which left a real link to weight 0. The value now becomes Format 1 (same name, no link).
+- **Pinned weights and italics get correct style bits and names.** With wght pinned, the style bits were skipped and the file kept the source's; an italic file could end up REGULAR and ITALIC at once. BOLD is set from 700, REGULAR only when neither bold nor italic, and nameID 2 (RIBBI) and 17 (the picked style, or the default instance) agree with OS/2.
+- **Named instances' PostScript names** now follow the new prefix instead of the retail one.
+- **Safe PostScript names.** Accented names are transliterated (Été → Ete), names in other scripts get `Untitled-<hash>`, and names over 63 characters end in a hash so two long names never collide.
+- **avar 2 and VARC fonts are refused** where the installed fontTools can't restrict them correctly.
+
+### Added
+- `tests/test_review_fixes.py`: runs the controller's real pipeline on the Inter fixture (with vanilla stubbed), 6 tests.
+
 ## 1.2.3 — 2026-06-22
 
 ### Fixed

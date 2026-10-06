@@ -1,6 +1,6 @@
 # vf-clamp — RoboFont Extension
 
-**Version:** 1.2.3
+**Version:** 1.2.4
 
 ![vf-clamp design-space dialog — same UI as the Glyphs plugin, shown here inside Glyphs.app on a real source font](screenshots/dialog.png)
 
